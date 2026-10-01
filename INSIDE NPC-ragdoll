@@ -1,0 +1,425 @@
+local rig = script.Parent
+local humanoid = rig:FindFirstChildOfClass("Humanoid")
+local PhysicsService = game:GetService("PhysicsService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local combatFolder = ReplicatedStorage:WaitForChild("Combat")
+local RagdollCall = combatFolder:WaitForChild("Ragdoll")
+local RagdollCallServer = combatFolder:WaitForChild("RagdollCall") -- BindableEvent
+
+local root = rig:FindFirstChild("HumanoidRootPart")
+local rootsavedrotation = nil
+local Attacker = nil -- fix typo: was "nill"
+humanoid.BreakJointsOnDeath = false
+-- Create collision groups if missing
+pcall(function()
+	PhysicsService:CreateCollisionGroup("IgnorePlayers")
+	PhysicsService:CreateCollisionGroup("Players")
+end)
+
+local limbs = {
+	"Head",
+	"Torso",
+	"Left Arm",
+	"Right Arm",
+	"Left Leg",
+	"Right Leg"
+}
+
+local originalJoints = {}
+
+------------------------------------------------------------
+-- Fully reset NPC back to normal
+local function forceFullReset()
+	-- Remove BallSockets, Attachments, and Colliders
+	for _, item in ipairs(rig:GetDescendants()) do
+		if item:IsA("BallSocketConstraint") or item:IsA("Attachment") or item.Name:find("_Collider") then
+			item:Destroy()
+		end
+	end
+
+	-- Restore joints
+	for _, jointData in ipairs(originalJoints) do
+		local motor = Instance.new("Motor6D")
+		motor.Part0 = jointData.Part0
+		motor.Part1 = jointData.Part1
+		motor.C0 = jointData.C0
+		motor.C1 = jointData.C1
+		motor.Name = jointData.Name
+		motor.Parent = jointData.Part0
+	end
+
+	originalJoints = {}
+end
+
+------------------------------------------------------------
+-- Create limb collider
+local function createColliderFor(part)
+	if not part or not part:IsA("BasePart") or part:FindFirstChild(part.Name .. "_Collider") then
+		return
+	end
+
+	local collider = Instance.new("Part")
+	collider.Size = part.Size * (part.Name == "Head" and 0.3 or 0.5)
+	collider.CFrame = part.CFrame
+	collider.Anchored = false
+	collider.CanCollide = true
+	collider.Massless = true
+	collider.Transparency = 0.5
+	collider.Name = part.Name .. "_Collider"
+	collider.BrickColor = BrickColor.Red()
+	collider.Material = Enum.Material.Neon
+	collider.Parent = rig
+
+	PhysicsService:SetPartCollisionGroup(collider, "IgnorePlayers")
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = collider
+	weld.Part1 = part
+	weld.Parent = collider
+end
+
+------------------------------------------------------------
+-- Replace Motor6D with ragdoll BallSocket
+local function replaceJointWithBallSocket(motor)
+	local part0 = motor.Part0
+	local part1 = motor.Part1
+	if not part0 or not part1 then return end
+
+	table.insert(originalJoints, {
+		Part0 = part0,
+		Part1 = part1,
+		C0 = motor.C0,
+		C1 = motor.C1,
+		Name = motor.Name
+	})
+
+	local a0 = Instance.new("Attachment", part0)
+	local a1 = Instance.new("Attachment", part1)
+	a0.Position = motor.C0.Position
+	a1.Position = motor.C1.Position
+
+	local socket = Instance.new("BallSocketConstraint")
+	socket.Attachment0 = a0
+	socket.Attachment1 = a1
+	socket.LimitsEnabled = true
+	socket.UpperAngle = 45
+	socket.TwistLimitsEnabled = true
+	socket.TwistLowerAngle = -45
+	socket.TwistUpperAngle = 45
+	socket.Parent = part0
+
+	motor:Destroy()
+end
+
+------------------------------------------------------------
+-- End ragdoll, stand up
+local function cancelRagdoll()
+	if humanoid.Health <= 0 then
+		return
+	end
+	rig.HumanoidRootPart.Anchored = true
+	forceFullReset()
+
+	if humanoid then
+		humanoid.PlatformStand = false
+	end
+
+	
+	root.CFrame = CFrame.new(root.Position) * rootsavedrotation * CFrame.Angles(90,0,0)
+	root.CFrame = root.CFrame * CFrame.Angles(math.rad(-30),0,0)
+
+	if humanoid then
+		local ReplicatedStorage = game:GetService("ReplicatedStorage")
+		local combatFolder = ReplicatedStorage:WaitForChild("Combat")
+		local standAnim = combatFolder:WaitForChild("StandAnim") -- your stored animation
+		local track = humanoid:LoadAnimation(standAnim)
+		track:Play()
+	end
+
+	local TweenService = game:GetService("TweenService")
+	local targetCFrame = root.CFrame * CFrame.Angles(math.rad(-90), 0, 0) * CFrame.new(0, 2.5, 0)
+	local tween = TweenService:Create(root, TweenInfo.new(1.7, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {CFrame = targetCFrame})
+
+	task.wait(1)
+	tween:Play()
+	tween.Completed:Connect(function()
+		root.Anchored = false
+		
+		rig:SetAttribute("Stunned", false)
+		if rig:FindFirstChild("Run") then
+			task.wait(0.5)
+			rig.Run:Fire()
+			rig:SetAttribute("Ragdolled", false)
+		end
+	end)
+end
+
+------------------------------------------------------------
+-- Listen for ragdoll event
+RagdollCall.OnServerEvent:Connect(function(Attacker, Isme)
+	if Isme == script.Parent then
+		
+		if rig:GetAttribute("Ragdolled") then
+			return
+		end
+		forceFullReset() -- Always start fresh
+	
+
+		local AttackerHrp = Attacker.Character and Attacker.Character:FindFirstChild("HumanoidRootPart")
+		local VictimHrp = Isme and Isme:FindFirstChild("HumanoidRootPart")
+		if not (AttackerHrp and VictimHrp) then
+			return
+		end
+
+		-- Save rotation
+		rootsavedrotation = root.CFrame - root.Position
+
+		-- Apply push force before ragdoll
+		local direction = (VictimHrp.Position - AttackerHrp.Position).Unit
+		VictimHrp.AssemblyLinearVelocity = direction * 35
+
+		
+		rig.HumanoidRootPart.Anchored = false
+
+		-- Add colliders
+		for _, name in ipairs(limbs) do
+			local limb = rig:FindFirstChild(name)
+			if limb then
+				createColliderFor(limb)
+			end
+		end
+
+		-- Swap joints to ragdoll
+		for _, descendant in ipairs(rig:GetDescendants()) do
+			if descendant:IsA("Motor6D") then
+				replaceJointWithBallSocket(descendant)
+			end
+		end
+
+		if humanoid then
+			humanoid.RequiresNeck = false
+			humanoid.PlatformStand = true
+		end
+		local hum = rig:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			task.delay(3, cancelRagdoll)
+		else
+			if script.Parent.BehaviorScript  then
+				script.Parent.BehaviorScript:Destroy()
+
+			end
+			script.Parent.AnimHandler:Destroy()
+			script.Parent.Ragdoll:Destroy()
+		end
+	  task.wait(0.1)
+		rig:SetAttribute("Ragdolled", true)
+	end
+end)
+
+local npc = script.Parent
+local humanoid = npc:FindFirstChildOfClass("Humanoid")
+humanoid.BreakJointsOnDeath = false
+if humanoid then
+	humanoid.Died:Connect(function()
+		for i = 1 ,10  do
+			
+	    
+		print("Custom death, overriding default")
+		-- do ragdoll, effects, etc.
+		if rig:GetAttribute("Ragdolled") then
+		
+			return
+		end
+			forceFullReset()
+		rig:SetAttribute("Ragdolled", true)
+		if script.Parent.BehaviorScript  then
+			script.Parent.BehaviorScript:Destroy()
+
+		end
+			
+			script.Parent.AnimHandler:Destroy()
+			
+			npc.HumanoidRootPart.Anchored = false
+			if humanoid then
+				local animator = humanoid:FindFirstChildOfClass("Animator")
+				if animator then
+					for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+						track:Stop(0) -- 0 = no fade-out, use e.g. 0.2 for smooth stop
+					end
+				end
+			end
+			task.wait(0.2)
+			if npc.HumanoidRootPart then
+				local randomDirection = Vector3.new(
+					math.random(-10, 10),
+					math.random(5, 15), -- upward push
+					math.random(-10, 10)
+				)
+				npc.HumanoidRootPart.AssemblyLinearVelocity = randomDirection
+			end
+			for _, name in ipairs(limbs) do
+				local limb = rig:FindFirstChild(name)
+				if limb then
+					createColliderFor(limb)
+				end
+			end
+
+			-- Swap joints to ragdoll
+			for _, descendant in ipairs(rig:GetDescendants()) do
+				if descendant:IsA("Motor6D") then
+					replaceJointWithBallSocket(descendant)
+				end
+			end
+
+			if humanoid then
+				humanoid.RequiresNeck = false
+				humanoid.PlatformStand = true
+			end
+			local hum = rig:FindFirstChildOfClass("Humanoid")
+
+		end
+		task.wait(0.1)
+	end)
+end
+
+
+
+
+
+
+
+
+
+
+
+
+RagdollCallServer.Event:Connect(function(attacker, victim)
+	print("yessir")
+	if victim == npc then
+
+
+		if rig:GetAttribute("Ragdolled") then
+			return
+		end
+
+		forceFullReset() -- Always start fresh
+
+		local attackerHrp = attacker and attacker:FindFirstChild("HumanoidRootPart")
+		local victimHrp = victim:FindFirstChild("HumanoidRootPart")
+		if not (attackerHrp and victimHrp) then
+			return
+		end
+
+		-- Save rotation
+		rootsavedrotation = rig.HumanoidRootPart.CFrame - rig.HumanoidRootPart.Position
+
+		-- Apply push force before ragdoll
+		local direction = (victimHrp.Position - attackerHrp.Position).Unit
+		victimHrp.AssemblyLinearVelocity = direction * 35
+
+		rig.HumanoidRootPart.Anchored = false
+
+		-- Add colliders
+		for _, name in ipairs(limbs) do
+			local limb = rig:FindFirstChild(name)
+			if limb then
+				createColliderFor(limb)
+			end
+		end
+
+		-- Swap joints to ragdoll
+		for _, descendant in ipairs(rig:GetDescendants()) do
+			if descendant:IsA("Motor6D") then
+				replaceJointWithBallSocket(descendant)
+			end
+		end
+
+		if humanoid then
+			humanoid.RequiresNeck = false
+			humanoid.PlatformStand = true
+		end
+
+		local hum = rig:FindFirstChildOfClass("Humanoid")
+		if hum and hum.Health > 0 then
+			task.delay(3, cancelRagdoll)
+		else
+			if npc:FindFirstChild("BehaviorScript") then
+				npc.BehaviorScript:Destroy()
+			end
+			if npc:FindFirstChild("AnimHandler") then
+				npc.AnimHandler:Destroy()
+			end
+			if npc:FindFirstChild("Ragdoll") then
+				npc.Ragdoll:Destroy()
+			end
+		end
+
+		task.wait(0.1)
+		rig:SetAttribute("Ragdolled", true)
+	end
+end)
+
+-- Custom death handling
+if humanoid then
+	humanoid.BreakJointsOnDeath = false
+	humanoid.Died:Connect(function()
+		print("Custom death, overriding default")
+
+		if rig:GetAttribute("Ragdolled") then
+		
+			return
+		end
+
+		forceFullReset()
+		rig:SetAttribute("Ragdolled", true)
+
+		if npc:FindFirstChild("BehaviorScript") then
+			npc.BehaviorScript:Destroy()
+		end
+
+		if npc:FindFirstChild("AnimHandler") then
+			npc.AnimHandler:Destroy()
+		end
+
+		npc.HumanoidRootPart.Anchored = false
+
+		if humanoid then
+			local animator = humanoid:FindFirstChildOfClass("Animator")
+			if animator then
+				for _, track in ipairs(animator:GetPlayingAnimationTracks()) do
+					track:Stop(0)
+				end
+			end
+		end
+
+		task.wait(0.2)
+
+		if npc.HumanoidRootPart then
+			local randomDirection = Vector3.new(
+				math.random(-10, 10),
+				math.random(5, 15), -- upward push
+				math.random(-10, 10)
+			)
+			npc.HumanoidRootPart.AssemblyLinearVelocity = randomDirection
+		end
+
+		for _, name in ipairs(limbs) do
+			local limb = rig:FindFirstChild(name)
+			if limb then
+				createColliderFor(limb)
+			end
+		end
+
+		-- Swap joints to ragdoll
+		for _, descendant in ipairs(rig:GetDescendants()) do
+			if descendant:IsA("Motor6D") then
+				replaceJointWithBallSocket(descendant)
+			end
+		end
+
+		if humanoid then
+			humanoid.RequiresNeck = false
+			humanoid.PlatformStand = true
+		end
+	end)
+end
