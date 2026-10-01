@@ -1,0 +1,306 @@
+prompt = script.Parent
+
+NPC = prompt.Parent.Parent
+local idleAnim = NPC:WaitForChild("Idle")
+local StopAnim = NPC:WaitForChild("StopWalkAndIdle")
+humanoid = NPC:WaitForChild("Humanoid")
+local plranimationId = "rbxassetid://74055223950102"
+local plranimationId2 = "rbxassetid://112154356345131"
+
+local npcanimationID = "rbxassetid://71284950598429"
+local npcanimationID2 = "rbxassetid://83539161236270"
+local plranim = Instance.new("Animation")
+local npcanim = Instance.new("Animation")
+local plranim2 = Instance.new("Animation")
+local npcanim2 = Instance.new("Animation")
+npcanim.AnimationId = npcanimationID
+plranim.AnimationId = plranimationId
+npcanim2.AnimationId = npcanimationID2
+plranim2.AnimationId = plranimationId2
+
+
+local npctrack = NPC.Humanoid:LoadAnimation(npcanim)
+local npctrack2 = NPC.Humanoid:LoadAnimation(npcanim2)
+---------------------------------------------------------------------------------------------------------------------------------------------
+local TweenService = game:GetService("TweenService")
+
+
+
+
+----------------------------------------------------------Ragdoll----------------------------------------------------------------------------------
+local limbs = { "Head", "Torso", "Left Arm", "Right Arm", "Left Leg", "Right Leg" }
+
+-- === Create Collision Part for Each Limb ===
+local function createColliderFor(part)
+	if not part or not part:IsA("BasePart") then return end
+
+	local collider = Instance.new("Part")
+
+	if part.Name == "Head" then
+		collider.Size = part.Size * 0.3
+	else
+		collider.Size = part.Size * 0.7
+	end
+
+	collider.CFrame = part.CFrame
+	collider.Anchored = false
+	collider.CanCollide = true
+	collider.Massless = true
+	collider.Transparency = 0.5
+	collider.Name = part.Name .. "_Collider"
+	collider.BrickColor = BrickColor.Red()
+	collider.Material = Enum.Material.Neon
+	collider.Parent = NPC
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = collider
+	weld.Part1 = part
+	weld.Parent = collider
+end
+
+-- === Convert Motor6D to BallSocket ===
+local function replaceJointWithBallSocket(motor)
+	local part0 = motor.Part0
+	local part1 = motor.Part1
+	if not part0 or not part1 then return end
+
+	local a0 = Instance.new("Attachment", part0)
+	local a1 = Instance.new("Attachment", part1)
+
+	-- Position the attachments at the motor's joint
+	a0.Position = motor.C0.Position
+	a1.Position = motor.C1.Position
+
+	local socket = Instance.new("BallSocketConstraint")
+	socket.Attachment0 = a0
+	socket.Attachment1 = a1
+	socket.LimitsEnabled = true
+	socket.UpperAngle = 45
+	socket.TwistLimitsEnabled = true
+	socket.TwistLowerAngle = -45
+	socket.TwistUpperAngle = 45
+
+	socket.Parent = part0
+
+	motor:Destroy()
+end
+------------------------------------------------------------ragdoll collision---------------------------------------------------------------
+local PhysicsService = game:GetService("PhysicsService")
+
+-- Create two collision groups if they don’t exist
+pcall(function()
+	PhysicsService:CreateCollisionGroup("IgnorePlayers")
+	PhysicsService:CreateCollisionGroup("Players")
+end)
+
+-- Make sure they collide with everything except each other
+PhysicsService:CollisionGroupSetCollidable("IgnorePlayers", "Players", false)
+PhysicsService:CollisionGroupSetCollidable("IgnorePlayers", "Default", true)
+PhysicsService:CollisionGroupSetCollidable("IgnorePlayers", "IgnorePlayers", true)
+
+
+-----------------------------------------------------------------------------------------------------------------------
+True = NPC:GetAttributeChangedSignal("Detected"):Connect(function()
+
+	
+if prompt.Enabled == true  then
+	prompt.Enabled = false
+	print("can not be taken down no more")
+else
+	prompt.Enabled = true
+	print("can be taken down")
+end
+	
+	
+end)
+
+
+prompt.Triggered:Connect(function(player)
+	local rand = math.random(0,1)
+	print(rand)
+    if rand == 3  then
+	NPC:WaitForChild("BehaviorScript"):Destroy()
+	StopAnim:Fire()
+	wait(0.2)
+ 
+
+	 
+
+		player.Character.HumanoidRootPart.Anchored = true
+	NPC.HumanoidRootPart.Anchored = true
+	wait(0.1)
+		local playerRoot = player.Character:WaitForChild("HumanoidRootPart")
+		local npcRoot = NPC:WaitForChild("HumanoidRootPart")
+
+		local targetCFrame = npcRoot.CFrame * CFrame.new(0, 0, 4)
+		local targetOrientation = npcRoot.Orientation
+
+		local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local goal = {
+			Position = targetCFrame.Position,
+			Orientation = targetOrientation
+		}
+
+		local tween = TweenService:Create(playerRoot, tweenInfo, goal)
+		tween:Play()
+		tween.Completed:Wait()
+
+		
+	
+	
+	
+	for _,part in NPC:GetChildren() do
+		if part:IsA("BasePart") then
+			part.CanCollide = false
+		end
+	end
+	
+	
+	local plrtrack =  player.Character.Humanoid:LoadAnimation(plranim)
+	
+
+	plrtrack:Play()
+	npctrack:Play()
+	wait(npctrack.Length)
+	-- 1. Create colliders
+	for _, name in ipairs(limbs) do
+		local limb = NPC:FindFirstChild(name)
+		if limb then
+			createColliderFor(limb)
+		end
+	end
+
+	-- 2. Replace Motor6Ds with BallSocketConstraints
+	for _, descendant in ipairs(NPC:GetDescendants()) do
+		if descendant:IsA("Motor6D") then
+			replaceJointWithBallSocket(descendant)
+		end
+	end
+
+	-- 3. Remove RequiresNeck
+	if humanoid then
+		pcall(function()
+			humanoid.RequiresNeck = false
+		end)
+	end
+
+	-- 4. Enable PlatformStand to stop character animation/standing
+	if humanoid then
+		humanoid.PlatformStand = true
+	end
+
+	print("SIGMAAAAAAAAAAAAAAAAAAAAA")
+	player.Character.HumanoidRootPart.Anchored = false
+	NPC.HumanoidRootPart.Anchored = false
+	for _,part in NPC:GetChildren() do
+		if part:IsA("BasePart") then
+			part.CanCollide = true
+		end
+	end
+	else
+		NPC:WaitForChild("BehaviorScript"):Destroy()
+		StopAnim:Fire()
+		wait(0.2)
+
+
+
+
+		player.Character.HumanoidRootPart.Anchored = true
+		NPC.HumanoidRootPart.Anchored = true
+		wait(0.1)
+
+		local playerRoot = player.Character:WaitForChild("HumanoidRootPart")
+		local npcRoot = NPC:WaitForChild("HumanoidRootPart")
+
+		local targetCFrame = npcRoot.CFrame * CFrame.new(0, 0,1)
+		local targetOrientation = npcRoot.Orientation
+
+		local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local goal = {
+			Position = targetCFrame.Position,
+			Orientation = targetOrientation
+		}
+
+		local tween = TweenService:Create(playerRoot, tweenInfo, goal)
+		tween:Play()
+		tween.Completed:Wait()
+
+             
+
+
+		for _,part in NPC:GetChildren() do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
+
+
+		local plrtrack2 =  player.Character.Humanoid:LoadAnimation(plranim2)
+
+
+		plrtrack2:Play()
+		npctrack2:Play()
+		wait(npctrack.Length *0.95)
+		player.Character.HumanoidRootPart.CFrame = NPC:WaitForChild("HumanoidRootPart").CFrame * CFrame.new(0, 0,5)
+		-- 1. Create colliders
+		for _, name in ipairs(limbs) do
+			local limb = NPC:FindFirstChild(name)
+			if limb then
+				createColliderFor(limb)
+			end
+		end
+
+		-- 2. Replace Motor6Ds with BallSocketConstraints
+		for _, descendant in ipairs(NPC:GetDescendants()) do
+			if descendant:IsA("Motor6D") then
+				replaceJointWithBallSocket(descendant)
+			end
+		end
+
+		-- 3. Remove RequiresNeck
+		if humanoid then
+			pcall(function()
+				humanoid.RequiresNeck = false
+			end)
+		end
+
+		-- 4. Enable PlatformStand to stop character animation/standing
+		if humanoid then
+			humanoid.PlatformStand = true
+		end
+
+		print("SIGMAAAAAAAAAAAAAAAAAAAAA")
+		player.Character.HumanoidRootPart.Anchored = false
+		NPC.HumanoidRootPart.Anchored = false
+		for _,part in NPC:GetChildren() do
+			if part:IsA("BasePart") then
+				part.CanCollide = true
+			end
+		end
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+	end
+	
+	
+end)
+
