@@ -1,0 +1,586 @@
+
+
+--------------------------------------------------Variables-----------------------------------------------------------
+
+
+local NPC = script.Parent
+local npc = script.Parent
+local hrp = npc:WaitForChild("HumanoidRootPart")
+
+local humanoid = npc:WaitForChild("Humanoid")
+local RunService = game:GetService("RunService")
+local head = npc:WaitForChild("Head")
+local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+local TweenService = game:GetService("TweenService")
+
+
+local finished = Instance.new("BindableEvent")
+local finished2 = Instance.new("BindableEvent")
+
+local WalkAnim = npc:WaitForChild("Walk")
+local RunAnim = npc:WaitForChild("Run")
+local idleAnim = npc:WaitForChild("Idle")
+local BlockAnim = npc:WaitForChild("Block")
+local AttackAnim = npc:WaitForChild("Attack")
+local BlockMoveAnim = npc:WaitForChild("BlockMove")
+local gothit1Anim = npc:WaitForChild("GotHit1")
+local gothit2Anim = npc:WaitForChild("GotHit2")
+local BlockBrokenAnim = npc:WaitForChild("BlockBroken")
+
+local waypoints = {
+	workspace:WaitForChild("Waypoint1"),
+	workspace:WaitForChild("Waypoint2"),
+	workspace:WaitForChild("Waypoint3"),
+	workspace:WaitForChild("Waypoint4"),
+}
+local currentIndex = 1
+
+
+local rerun = 1
+local rerunpatrol = 1
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CombatFolder = ReplicatedStorage:WaitForChild("Combat")
+local stunEvent = CombatFolder:WaitForChild("StunEvent")
+
+
+
+--------------------------------------------------------------------------------------------------------------------------
+
+local radius = 50
+local params = OverlapParams.new()
+params.FilterType = Enum.RaycastFilterType.Blacklist
+params.FilterDescendantsInstances = {npc} -- Ignore self
+
+local function ScanNearbyNPCs(player)
+	local parts = workspace:GetPartBoundsInRadius(npc:GetPivot().Position, radius, params)
+	local found = {}
+	local attackingCount = 0
+	local candidates = {}
+
+	-- Add this NPC first
+	table.insert(candidates, {
+		Model = npc,
+		Distance = (player.Character.HumanoidRootPart.Position - npc.HumanoidRootPart.Position).Magnitude
+	})
+
+	for _, part in ipairs(parts) do
+		local model = part:FindFirstAncestorOfClass("Model")
+		if model and not found[model] and model ~= npc then
+			found[model] = true -- only process once
+
+			-- Only consider NPCs that actually have NPCAttacking attribute
+			if model:FindFirstChild("Humanoid") and model.Humanoid.Health > 0 then
+				-- ✅ Only count living NPCs
+			
+			if model:GetAttribute("NPCAttacking") ~= nil then
+				local state = model:GetAttribute("NPCAttacking")
+				--print("Model:", model.Name, "| NPCAttacking:", state)
+
+				if state == true then
+					attackingCount += 1
+				end
+
+				-- Track for closest check
+				if model:FindFirstChild("HumanoidRootPart") then
+					local dist = (player.Character.HumanoidRootPart.Position - model.HumanoidRootPart.Position).Magnitude
+					table.insert(candidates, {Model = model, Distance = dist})
+				end
+			end
+			end
+		end
+	end
+
+	-- ✅ Rule 1: If this NPC is the ONLY one nearby
+	if #candidates == 1 then
+		return true
+	end
+
+	-- ✅ Rule 2: If there are exactly  3 NPCs total (this npc + one other)
+	if #candidates == 3 then
+		return true
+	end
+
+	-- ✅ Rule 3: Less than 2 actively attacking AND npc is closest, 2nd, or 3rd closest
+	if attackingCount < 2 then
+		table.sort(candidates, function(a, b)
+			return a.Distance < b.Distance
+		end)
+
+		if candidates[1] and candidates[1].Model == npc then
+			return true
+		elseif candidates[2] and candidates[2].Model == npc then
+			return true
+		end
+	elseif candidates[3] and candidates[3].Model == npc then
+	   if math.random(0,1) == 1 then
+			return true
+	   end
+	end
+	
+
+
+	-- ❌ Rule 4: Otherwise false
+	return false
+end
+
+--------------------------------------------------Ragdoll-----------------------------------------------------------
+
+local PathfindingService = game:GetService("PathfindingService")
+
+local function moveToTarget(targetPosition)
+	if npc:GetAttribute("Stunned") then
+		--print("cancelinng")
+		return -- cancel this mid-path update completely
+	end
+
+	if rerun == 1 then
+		humanoid.WalkSpeed = 8
+		local path = PathfindingService:CreatePath({
+			AgentRadius = 2,
+			AgentHeight = 5,
+			AgentCanJump = true,
+			AgentCanClimb = true,
+		})
+
+		path:ComputeAsync(npc.HumanoidRootPart.Position, targetPosition)
+
+		if path.Status == Enum.PathStatus.Success then
+			for _, w in ipairs(path:GetWaypoints()) do
+				local p = Instance.new("Part")
+				p.Size = Vector3.new(0.4,0.4,0.4)
+				p.Anchored = true
+				p.CanCollide = false
+				p.Position = w.Position
+				p.Shape = Enum.PartType.Ball
+				p.Material = Enum.Material.Neon
+				p.Color = Color3.new(1,0,0)
+				p.Parent = workspace
+				game:GetService("Debris"):AddItem(p, 22)
+			end
+
+			for _, waypoint in ipairs(path:GetWaypoints()) do
+				local reached = false
+				humanoid:MoveTo(waypoint.Position)
+
+				local moveConnection
+				moveConnection = humanoid.MoveToFinished:Connect(function(reachedTarget)
+					reached = reachedTarget
+				end)
+
+				repeat
+					task.wait(0.1)
+					-- Abort path if detection happens
+					if npc:GetAttribute("Detected") == true then
+						--print("Movement interrupted: Player detected")
+						rerun = 0
+						humanoid:MoveTo(npc.HumanoidRootPart.Position) -- Stop moving
+						if moveConnection then
+							moveConnection:Disconnect()
+						end
+						return -- <-- Exit function
+					end
+				until reached or not npc or not npc.Parent
+
+				if moveConnection then
+					moveConnection:Disconnect()
+				end
+
+				if not reached then
+					warn("Failed to reach waypoint. NPC might be stuck.")
+					return
+				end
+			end
+
+			-- Only reaches here if full path completed
+			--print("Reached target position")
+			idleAnim:Fire()
+			task.wait(20)
+			finished:Fire()
+		else
+			warn("Pathfinding failed with status:", path.Status.Name)
+		end
+	else
+		rerun = 1
+	end
+end
+
+----------------------------------------------------------------------------------------------------
+local function waitForFinished()
+	local finishedFlag = false
+	-- Connect once
+	local conn = finished.Event:Connect(function()
+		finishedFlag = true
+	end)
+	-- Wait until the event is fired
+	repeat task.wait(0.1) until finishedFlag
+	conn:Disconnect() -- Clean up connection
+end
+
+----------------------------------------------------------------------------------------------
+local Players = game:GetService("Players")
+
+---------------------------------------------------------------------
+local function patrol()
+	if rerunpatrol == 1 then
+		if not npc:GetAttribute("Detected") then
+			while true do
+				local currentWaypoint = waypoints[currentIndex]
+				--print("Moving to:", currentWaypoint.Name)
+
+				-- Exit early if detected before move starts
+				if npc:GetAttribute("Detected") then break end
+				--print(npc:GetAttribute("Detected"))
+				WalkAnim:Fire()
+				moveToTarget(currentWaypoint.Position)
+
+				-- Exit early if detected after move ends
+				if npc:GetAttribute("Detected") then
+					--print("detect is trueeeeeeeeeeeeeeeeeeeeeeee")
+					rerunpatrol = 0
+					break
+				end
+
+				currentIndex += 3
+				if currentIndex > #waypoints then
+					currentIndex = 1
+				end
+				--print("Waiting for finished...")
+				--print("detect is true")
+			end
+		else
+			return
+		end
+	else
+		rerunpatrol = 1
+	end
+end
+-----------------------------------------------------------------------------------
+local fightingdistance = nil
+local blockingdistance = nil
+local roll = nil
+local previousaction = nil
+local fighting = function(player)
+	fightingdistance = (NPC.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+if NPC:GetAttribute("Stunned") == true or fightingdistance > 20 then print("TOOO FARR") return end 
+humanoid.WalkSpeed = 8
+while NPC:GetAttribute("Stunned") == false	 do
+		
+		humanoid:MoveTo(player.Character.HumanoidRootPart.Position)
+		if NPC:GetAttribute("Stunned") == false and fightingdistance < math.random(9,20) then
+			blockingdistance = (NPC.HumanoidRootPart.Position - player.Character.HumanoidRootPart.Position).Magnitude
+			roll  = math.random(1,4)
+			--print("roll is ", roll)
+			--print("previous is ", previousaction)
+			if roll == 1  and NPC:GetAttribute("Stunned") == false and  previousaction ~= "Idle" then
+				task.wait(0.15)
+				if NPC:GetAttribute("Stunned") == true then break  end
+				previousaction = "Idle"
+				humanoid.WalkSpeed = 0
+				idleAnim:Fire()
+				for i = 1, 15 do -- 30 * 0.1s = ~3 seconds
+					if npc:GetAttribute("Stunned") then
+						--print("Stopped: NPC is stunned")
+						
+						break
+					end
+
+					local lookAtPos = Vector3.new(player.Character.HumanoidRootPart.Position.X, hrp.Position.Y, player.Character.HumanoidRootPart.Position.Z)
+					hrp.CFrame = CFrame.lookAt(hrp.Position, lookAtPos)
+
+					task.wait(({0.1, 0.15})[math.random(1,2)]) -- repeat every 0.1s
+				end
+				
+			elseif (roll == 2 or roll == 3) and NPC:GetAttribute("Stunned") == false  and  previousaction ~= "Attack" then
+				task.wait(0.15)
+				if NPC:GetAttribute("Stunned") == true then break  end
+				previousaction = "Attack"
+				local result = ScanNearbyNPCs(player)
+				--print("Result:", result,script.Parent.Name)
+				if result == true then
+					humanoid.WalkSpeed = 10
+					if NPC:GetAttribute("Stunned") ~= true  then
+						
+					RunAnim:Fire()
+					NPC:SetAttribute("NPCAttacking",true)
+					NPC.Head.Color = Color3.new(1, 0, 0) -- red
+						for i = 1, 30 do -- ~3 seconds
+							if NPC:GetAttribute("Stunned") then break end -- stop if stunned
+							if NPC:GetAttribute("NPCAttacking") == false then break end
+							-- keep chasing the player
+							local targetPos = player.Character.HumanoidRootPart.Position
+							fightingdistance = (NPC.HumanoidRootPart.Position - targetPos).Magnitude
+							humanoid:MoveTo(targetPos) 
+							if fightingdistance < 5  then
+								AttackAnim:Fire()
+								if player.Character:GetAttribute("ibusyplayer") == false then
+									print("iframe nni is ",player.Character:GetAttribute("ibusyplayer"))
+								player.Character:FindFirstChild("Humanoid"):TakeDamage(20)
+								
+								end
+								task.wait(1) 
+								break
+							end
+                          
+							--print("Attacking and moving to", targetPos)
+							task.wait(0.1) -- don’t spam MoveTo every 0.1s, give time to update
+						end
+					
+					NPC:SetAttribute("NPCAttacking", false)
+					NPC.Head.Color = Color3.new(1, 1, 1) -- white
+						--print("Dayen finished attack")
+					task.wait(0.1)
+					end
+				end
+			elseif roll == 4  and NPC:GetAttribute("Stunned") == false and previousaction ~= "Block" and blockingdistance < 8 then
+				task.wait(0.15)
+				if NPC:GetAttribute("Stunned") == true then break  end
+				previousaction = "Block"
+				humanoid.WalkSpeed = 4
+				BlockMoveAnim:Fire()
+				npc:SetAttribute("Blocking",3)
+				task.wait(0.2)
+				for i = 1, 60 do -- ~3 seconds
+					if npc:GetAttribute("Stunned") then
+						break
+					end
+					if NPC:GetAttribute("Blocking") == 0  then
+						BlockBrokenAnim:Fire()
+						task.wait(3)
+						return
+					end
+					local lookAtPos = Vector3.new(
+						player.Character.HumanoidRootPart.Position.X,
+						hrp.Position.Y,
+						player.Character.HumanoidRootPart.Position.Z
+					)
+					--print("Movin'''''''''''''''''''''''''''''''''''")
+					-- Make NPC face the player
+					hrp.CFrame = CFrame.lookAt(hrp.Position, lookAtPos)
+
+					-- Step 3 studs back relative to facing direction
+					hrp.CFrame = hrp.CFrame + (hrp.CFrame.LookVector * -0.14)
+
+					task.wait(({0.05, 0.07})[math.random(1,2)]) -- repeat every ~0.1s
+				end
+
+
+				npc:SetAttribute("Blocking",0)
+				
+					task.wait(0.5)
+				
+
+
+			end
+			
+		   end
+		task.wait(0.1)
+--print("brooo")
+end
+
+
+end
+
+
+
+
+-------------------------------------------------------------------------------------
+local distance = nil
+--------------------------------------------------------------------------------
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+local Debris = game:GetService("Debris")
+
+local function chase(player)
+	if not player or not player.Character then return end
+	local targetHRP = player.Character:FindFirstChild("HumanoidRootPart")
+	if not targetHRP then return end
+	local humanoid = npc:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	--print("Chase started.")
+	RunAnim:Fire()
+
+	while true do
+		-- If stunned → pause movement until unstunned
+		if npc:GetAttribute("Stunned") then
+			local hrp = npc:FindFirstChild("HumanoidRootPart")
+			if hrp then hrp.Anchored = true end
+
+			-- Wait until stun ends
+			local npcHRP = npc:FindFirstChild("HumanoidRootPart")
+			local targetHRP = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			if npcHRP and targetHRP then
+				-- Keep Y level so NPC doesn't tilt up/down
+				local lookAtPos = Vector3.new(targetHRP.Position.X, npcHRP.Position.Y, targetHRP.Position.Z)
+				npcHRP.CFrame = CFrame.lookAt(npcHRP.Position, lookAtPos)
+			end
+
+			repeat task.wait(0.05) until not npc:GetAttribute("Stunned")
+			if hrp then hrp.Anchored = false end
+		end
+
+		-- Stop if target disappears or dies
+		if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+			break
+		end
+		if player.Character:FindFirstChildOfClass("Humanoid").Health <= 0 then
+			break
+		end
+		distance = (NPC.HumanoidRootPart.Position - targetHRP.Position).Magnitude
+		--print(distance)
+		if distance < 15  then
+			fighting(player)
+		end
+		-- Move toward target
+		humanoid:MoveTo(targetHRP.Position)
+		task.wait(0.1)
+	end
+
+	--print("Chase ended.")
+end
+
+------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------FIGHTING---------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-----------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------
+
+local function detectPlayerLoop()
+	while true do
+		task.wait(0.2)
+		if npc:GetAttribute("Detected") == false then
+			for _, player in ipairs(Players:GetPlayers()) do
+				local character = player.Character
+				if character and character:FindFirstChild("HumanoidRootPart") then
+					local targetPos = character.HumanoidRootPart.Position
+					local npcPos = npc.PrimaryPart.Position
+
+					-- Horizontal distance only
+					local flatNPC = Vector3.new(npcPos.X, 0, npcPos.Z)
+					local flatTarget = Vector3.new(targetPos.X, 0, targetPos.Z)
+					local distance = (flatTarget - flatNPC).Magnitude
+
+					if distance <= 50 then
+						-- FOV check (180° front view)
+						local dirToPlayer = (flatTarget - flatNPC).Unit
+						local facingDir = npc.PrimaryPart.CFrame.LookVector
+						local angle = math.deg(math.acos(facingDir:Dot(dirToPlayer)))
+
+						if angle <= 80 then
+							-- Height difference check (within ±5 studs vertically)
+							local yDiff = math.abs(targetPos.Y - npcPos.Y)
+							if yDiff <= 5 then
+								-- Raycast (line of sight) check
+								local rayParams = RaycastParams.new()
+								rayParams.FilterDescendantsInstances = {npc}
+								rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+								rayParams.IgnoreWater = true
+
+								local rayOrigin = npc.PrimaryPart.Position
+								local rayDirection = (targetPos - rayOrigin)
+								local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+
+								if result and result.Instance and not result.Instance:IsDescendantOf(character) then
+									--print("Line of sight blocked by:", result.Instance:GetFullName())
+									continue -- Skip detection, blocked
+								end
+
+								-- Player is visible and valid
+								--print("Player Detected:", player)
+								--print(distance)
+								--print("DETECTED")
+								npc:SetAttribute("Detected", true)
+								--print("DETECTED")
+								chase(player)
+								return -- Exit detection loop
+							end
+						end
+					end
+				end
+			end
+		else
+			--print("DETECTED IS TRUEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
+		end
+	end
+end
+
+--------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------
+
+-- Start patrolling
+task.spawn(detectPlayerLoop)
+task.spawn(patrol)
+
+finished2.Event:Connect(function()
+	--print("fireeeeeeeeeeeed")
+	task.wait(3)
+	--print("firooooooooooooooooooooooooooooooooooooood")
+	rerunpatrol = 1
+	--print("firooooooooo2222222222222222222222oood")
+	task.spawn(detectPlayerLoop)
+	task.spawn(patrol)
+end)
+
+wait(3)
+WalkAnim:Fire()
+
+-----------------------------------------------------------------------------------------------------------------
+local toggle = false
+stunEvent.Event:Connect(function(character)
+	if character == script.Parent then
+		toggle = not toggle
+		if toggle then
+			gothit1Anim:Fire()
+			--print("BROOOO")
+		else
+			gothit2Anim:Fire()
+		end
+	end
+end)
