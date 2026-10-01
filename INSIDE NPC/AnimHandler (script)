@@ -1,0 +1,301 @@
+-- === Animation Loader ===
+local npc = script.Parent
+local humanoid = npc:WaitForChild("Humanoid")
+local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+local function loadAnim(id)
+	local anim = Instance.new("Animation")
+	anim.AnimationId = "rbxassetid://" .. id
+	return animator:LoadAnimation(anim)
+end
+
+local animations = {
+	Walk = loadAnim("137320283018596"),
+	Run = loadAnim("129496115468178"),
+	Idle = loadAnim("87873570083190"),
+	Attack = loadAnim("73907969044339"),
+	Block = loadAnim("124218384148444"),
+	BlockMove = loadAnim("126565132209588"),
+	Gothit1 = loadAnim("91942433760012"),
+	Gothit2 = loadAnim("102384413057341"),
+	BlockBroken = loadAnim("100175186793998")
+}
+------------------------------------------------------------------------------------------
+local WalkAnim = npc:WaitForChild("Walk")
+local RunAnim = npc:WaitForChild("Run")
+local IdleAnim = npc:WaitForChild("Idle")
+local BlockAnim = npc:WaitForChild("Block")
+local AttackAnim = npc:WaitForChild("Attack")
+local BlockMoveAnim = npc:WaitForChild("BlockMove")
+local StopAnimWalk = npc:WaitForChild("StopWalkAndIdle")
+local gothit1Anim = npc:WaitForChild("GotHit1")
+
+local gothit2Anim = npc:WaitForChild("GotHit2")
+local BlockBrokenAnim = npc:WaitForChild("BlockBroken")
+
+
+
+
+
+-------------------------------------------------------------------------------------
+WalkAnim.Event:Connect(function()
+	
+	if not animations.Walk.IsPlaying then
+		
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+
+
+		end
+		if  animations.Idle.IsPlaying   then
+			animations.Idle:Stop()
+
+
+		end
+	end
+	if animations.Attack.IsPlaying then
+		animations.Attack:Stop()
+	end
+	if animations.Block.IsPlaying then
+		animations.Block:Stop()
+	end
+		humanoid.WalkSpeed = 8
+		animations.Walk:Play()
+	
+	
+end)
+RunAnim.Event:Connect(function()
+
+	if not animations.Run.IsPlaying   then
+		
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+			
+
+		end
+		if  animations.Idle.IsPlaying   then
+			animations.Idle:Stop()
+
+
+		end
+		if animations.Attack.IsPlaying then
+			animations.Attack:Stop()
+		end
+		if animations.Block.IsPlaying then
+			animations.Block:Stop()
+		end
+		humanoid.WalkSpeed = 16
+		animations.Run:Play()
+
+	end
+
+end)
+IdleAnim.Event:Connect(function()
+
+	if not animations.Idle.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+
+
+		end
+		if animations.Block.IsPlaying then
+			animations.Block:Stop()
+		end
+		if animations.Attack.IsPlaying then
+			animations.Attack:Stop()
+		end
+		animations.Idle:Play()
+
+	end
+
+end)
+BlockAnim.Event:Connect(function()
+
+	if not animations.Block.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		if animations.Attack.IsPlaying then
+			animations.Attack:Stop()
+		end
+		animations.Block:Play()
+		
+
+	end
+
+end)
+AttackAnim.Event:Connect(function()
+
+	if not animations.Attack.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		if animations.Block.IsPlaying then
+			animations.Block:Stop()
+		end
+		animations.Attack:Play()
+
+
+	end
+
+end)
+BlockMoveAnim.Event:Connect(function()
+
+	if not animations.BlockMove.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		animations.BlockMove:Play()
+
+
+	end
+
+end)
+StopAnimWalk.Event:Connect(function()
+
+	if  animations.Walk.IsPlaying   then
+
+       animations.Walk:Stop()
+	end
+	if  animations.Idle.IsPlaying   then
+
+		animations.Idle:Stop()
+	end
+
+end)
+gothit1Anim.Event:Connect(function(character)
+ 
+		print(character)
+   
+	if not animations.Attack.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		if animations.Block.IsPlaying then
+			animations.Block:Stop()
+		end
+		if animations.BlockBroken.IsPlaying then
+			animations.BlockBroken:Stop()
+		end
+		
+		animations.Gothit1:Play()
+
+
+	end
+	
+end)
+gothit2Anim.Event:Connect(function(character)
+	 print(character)
+
+	if not animations.Attack.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		if animations.Block.IsPlaying then
+			animations.Block:Stop()
+		end
+		if animations.BlockBroken.IsPlaying then
+			animations.BlockBroken:Stop()
+		end
+	
+		animations.Gothit2:Play()
+
+
+	end
+	
+end)
+
+BlockBrokenAnim.Event:Connect(function(character)
+	print(character)
+
+	if not animations.Attack.IsPlaying   then
+
+		if  animations.Walk.IsPlaying   then
+			animations.Walk:Stop()
+
+
+		end
+		if  animations.Run.IsPlaying   then
+			animations.Run:Stop()
+			print("RUN IS RUNNNINGGGGGGGGGGGG")
+
+
+		end
+		if animations.Idle.IsPlaying then
+			animations.Idle:Stop()
+		end
+		if animations.BlockMove.IsPlaying then
+			animations.BlockMove:Stop()
+		end
+		
+		animations.BlockBroken:Play()
+
+
+	end
+
+end)
